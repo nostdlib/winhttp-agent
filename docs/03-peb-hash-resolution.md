@@ -104,9 +104,6 @@ internally:
    the export directory itself, it is a forwarder string ("NTDLL.RtlFoo")
    — return NULL rather than jump into a string.
 
-`ResolveExportByName` does the identical walk comparing
-names literally — used only by the test oracle, never by the agent.
-
 `include/system.h` defines the minimal PE structs
 (`IMAGE_DOS_HEADER_MIN`, `IMAGE_EXPORT_DIRECTORY_MIN`) and the signature
 constants.
