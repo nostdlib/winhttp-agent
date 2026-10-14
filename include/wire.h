@@ -1,4 +1,6 @@
 #pragma once
+#include "winhttp_api.h"
+#include "memory.h"
 
 typedef struct {
     CHAR *cur;
@@ -46,4 +48,13 @@ static inline void WriteDecimal(hwriter *w, UINT32 value)
         CHAR digit[2] = {rev[--n], '\0'};
         WriteText(w, digit);
     }
+}
+
+static inline DWORD SendErrorResponse(const WINHTTP_API *winhttp, HINTERNET socket, unsigned int correlationId)
+{
+    unsigned char response[8];
+    MemoryZero(response, 8);
+    int position = 4;
+    WriteU32LE(response, &position, correlationId);
+    return winhttp->WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, response, sizeof(response));
 }

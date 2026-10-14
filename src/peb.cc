@@ -26,6 +26,10 @@ PPEB GetCurrentPEB(void)
 PVOID GetModuleHandleFromPEB(UINT64 moduleNameHash)
 {
 	PPEB peb = GetCurrentPEB();
+	
+	if (peb == NULL)
+		return NULL;
+
 	PLIST_ENTRY list = &peb->LoaderData->InMemoryOrderModuleList;
 	PLIST_ENTRY entry = list->Flink;
 

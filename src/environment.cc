@@ -1,7 +1,7 @@
 #include "environment.h"
 #include "peb.h"
 
-BOOL CompareEnvName(const WCHAR *wide, const CHAR *narrow)
+static BOOL CompareEnvName(const WCHAR *wide, const CHAR *narrow)
 {
 	while (*narrow != '\0')
 	{
