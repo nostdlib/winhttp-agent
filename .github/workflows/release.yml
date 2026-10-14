@@ -79,7 +79,7 @@ jobs:
             mkdir -p obj
             ${{ matrix.triple }}-g++ -O2 -Iinclude $DEFS -Wall -Wextra \
               -fno-builtin -fno-asynchronous-unwind-tables -fno-stack-protector -mno-stack-arg-probe -fno-jump-tables -fno-vectorize -fno-slp-vectorize ${{ matrix.extra }} \
-              -DID_BUILD_NUMBER="$BUILD_NUMBER" \
+              -DAGENT_BUILD_NUMBER="$BUILD_NUMBER" \
               -DAGENT_COMMIT_HASH="\"$COMMIT_HASH\"" \
               -c \
               entry.cc src/picfixup.cc src/main.cc \

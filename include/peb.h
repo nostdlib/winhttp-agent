@@ -62,6 +62,8 @@ typedef struct _PEB
 	PVOID ImageBase;
 	PPEB_LDR_DATA LoaderData;
 	PRTL_USER_PROCESS_PARAMETERS ProcessParameters;
+	PVOID SubSystemData;
+	PVOID ProcessHeap;
 } PEB, *PPEB;
 
 PPEB GetCurrentPEB(void);

@@ -28,15 +28,19 @@ enum CommandType : UINT8
 #define STATUS_ERROR            1
 
 #define IDENTITY_FRAME_SIZE     754
-#define ID_HOSTNAME_SIZE        256
-#define ID_USERNAME_SIZE        256
+#define AGENT_HOSTNAME_SIZE        256
+#define AGENT_USERNAME_SIZE        256
 
-#define ID_OS_VERSION_SIZE      128
+#define AGENT_OS_VERSION_SIZE      128
 #define AGENT_API_VERSION       1
 #define AGENT_NAME_ID           5
 
-#ifndef ID_BUILD_NUMBER
-#define ID_BUILD_NUMBER         1
+#ifndef AGENT_BUILD_NUMBER
+#define AGENT_BUILD_NUMBER         1
+#endif
+
+#ifndef AGENT_COMMIT_HASH
+#define AGENT_COMMIT_HASH "course01"
 #endif
 
 #define SHELL_POOL_SIZE         256

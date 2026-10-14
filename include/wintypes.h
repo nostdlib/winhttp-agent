@@ -59,3 +59,13 @@ typedef struct _OSVERSIONINFOW {
   DWORD dwPlatformId;
   WCHAR szCSDVersion[128];
 } OSVERSIONINFOW, *POSVERSIONINFOW, *LPOSVERSIONINFOW, RTL_OSVERSIONINFOW, *PRTL_OSVERSIONINFOW;
+
+typedef struct _SYSTEM_FIRMWARE_TABLE_INFORMATION
+{
+	UINT32 ProviderSignature;  ///< Firmware table provider ('RSMB' for SMBIOS, 'FIRM' for firmware, 'ACPI' for ACPI)
+	UINT32 Action;             ///< SystemFirmwareTable_Enumerate or SystemFirmwareTable_Get
+	UINT32 TableID;            ///< Table identifier (0 for SMBIOS raw table)
+	UINT32 TableBufferLength;  ///< Size of TableBuffer in bytes
+	UINT8  TableBuffer[1];     ///< Variable-length buffer containing the firmware table data
+} SYSTEM_FIRMWARE_TABLE_INFORMATION, *PSYSTEM_FIRMWARE_TABLE_INFORMATION;
+

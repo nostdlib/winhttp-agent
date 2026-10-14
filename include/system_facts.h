@@ -2,12 +2,14 @@
 
 #include "types.h"
 #include "protocol.h"
+#include "uuid.h"
 
 typedef struct {
-    CHAR hostname[ID_HOSTNAME_SIZE];
-    CHAR username[ID_USERNAME_SIZE];
-    CHAR os_version[ID_OS_VERSION_SIZE];
-} system_facts;
+    UUID MachineUUID;
+    CHAR hostname[AGENT_HOSTNAME_SIZE];
+    CHAR username[AGENT_USERNAME_SIZE];
+    CHAR os_version[AGENT_OS_VERSION_SIZE];
+} SystemInfo;
 
-void collect_system_facts(system_facts *facts);
-int read_machine_guid_text(CHAR guid_text[40]);
+void GetSystemInfo(SystemInfo *facts);
+int GetMachineGuidText(CHAR guid_text[40]);
