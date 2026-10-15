@@ -63,8 +63,6 @@ typedef struct _OSVERSIONINFOW {
   DWORD dwPlatformId;
   WCHAR szCSDVersion[128];
 } OSVERSIONINFOW, *POSVERSIONINFOW, *LPOSVERSIONINFOW, RTL_OSVERSIONINFOW, *PRTL_OSVERSIONINFOW;
-<<<<<<< Updated upstream
-=======
 
 typedef struct _SYSTEM_FIRMWARE_TABLE_INFORMATION
 {
@@ -105,4 +103,3 @@ typedef struct _SMBIOS_TYPE1_SYSTEM_INFORMATION
 
 
 
->>>>>>> Stashed changes
