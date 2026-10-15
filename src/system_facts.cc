@@ -4,29 +4,23 @@
 #include "advapi.h"
 #include "memory.h"
 #include "stackstrings.h"
+#include "wintypes.h"
 
 static BOOL GetMachineUUID(UUID *uuid){
-    if (uuid == NULL)
-        return FALSE;
-    *uuid = UUID();
-            
     SYSTEM_FIRMWARE_TABLE_INFORMATION request{};
-    request.ProviderSignature = 0x52534D42u;
-    request.Action = 1;
-    request.TableID = 0;
-    request.TableBufferLength = 0;
-
+	request.ProviderSignature = RSMB_PROVIDER_SIGNATURE;
+	request.Action = SystemFirmwareTable_Get;
+	request.TableID = 0;
+	request.TableBufferLength = 0;
+    
     NTDLL ntdll;
     if (!NTDLL_Ctor(&ntdll) || ntdll.ZwQuerySystemInformation == NULL ||
         ntdll.RtlAllocateHeap == NULL || ntdll.RtlFreeHeap == NULL)
         return FALSE;
 
-    const UINT32 informationClass = 76;
-    const UINT32 headerSize = 16;
-    const UINT32 maximumBufferSize = 65536 + headerSize;
     UINT32 requiredSize = 0;
-    (void)ntdll.ZwQuerySystemInformation(informationClass, &request, headerSize, &requiredSize);
-    if (requiredSize <= headerSize + 8 || requiredSize > maximumBufferSize)
+    (void)ntdll.ZwQuerySystemInformation(SystemFirmwareTableInformation, &request, sizeof(SYSTEM_FIRMWARE_TABLE_INFORMATION), &requiredSize);
+    if (requiredSize == 0)
         return FALSE;
 
     PPEB peb = GetCurrentPEB();
@@ -38,79 +32,89 @@ static BOOL GetMachineUUID(UUID *uuid){
         return FALSE;
 
     auto firmwareInfo = (PSYSTEM_FIRMWARE_TABLE_INFORMATION)buffer;
-    firmwareInfo->ProviderSignature = request.ProviderSignature;
-    firmwareInfo->Action = 1;
-    firmwareInfo->TableID = 0;
-    firmwareInfo->TableBufferLength = requiredSize - headerSize;
+	firmwareInfo->ProviderSignature = RSMB_PROVIDER_SIGNATURE;
+	firmwareInfo->Action = SystemFirmwareTable_Get;
+	firmwareInfo->TableID = 0;
+	firmwareInfo->TableBufferLength = requiredSize - (UINT32)__builtin_offsetof(SYSTEM_FIRMWARE_TABLE_INFORMATION, TableBuffer);
 
     UINT32 returnedSize = 0;
-    BOOL found = FALSE;
-    if (ntdll.ZwQuerySystemInformation(informationClass, firmwareInfo, requiredSize, &returnedSize) == 0 && returnedSize >= headerSize + 8){
-        PUINT8 rawSmbios = firmwareInfo->TableBuffer;
-        UINT32 tableLength = (UINT32)rawSmbios[4] |
-                             ((UINT32)rawSmbios[5] << 8) |
-                             ((UINT32)rawSmbios[6] << 16) |
-                             ((UINT32)rawSmbios[7] << 24);
-        if (tableLength <= returnedSize - headerSize - 8){
-            PUINT8 tableData = rawSmbios + 8;
-            PUINT8 tableEnd = tableData + tableLength;
+    auto queryResult = ntdll.ZwQuerySystemInformation(SystemFirmwareTableInformation, firmwareInfo, requiredSize, &returnedSize);
 
-            while (tableData < tableEnd){
-                if ((USIZE)(tableEnd - tableData) < 4)
-                    break;
-                UINT8 structureLength = tableData[1];
-                if (structureLength < 4 || structureLength > (USIZE)(tableEnd - tableData))
-                    break;
-
-                // Type 1 = System Information; UUID begins at offset 8.
-                if (tableData[0] == 1 && structureLength >= 0x19){
-                        PUINT8 smbiosUuid = tableData + 8;
-                        BOOL allZero = TRUE;
-                        BOOL allFF = TRUE;
-                        for (INT32 i = 0; i < 16; i++) {
-                            if (smbiosUuid[i] != 0x00) allZero = FALSE;
-                            if (smbiosUuid[i] != 0xFF) allFF = FALSE;
-                        }
-
-                        if (!allZero && !allFF) {
-                            UINT8 uuidBytes[16];
-                            UINT8 smbiosMajor = rawSmbios[1];
-                            UINT8 smbiosMinor = rawSmbios[2];
-                            BOOL usesMixedEndian = smbiosMajor > 2 ||
-                                    (smbiosMajor == 2 && smbiosMinor >= 6);
-                            if (usesMixedEndian) {
-                                uuidBytes[0] = smbiosUuid[3];
-                                uuidBytes[1] = smbiosUuid[2];
-                                uuidBytes[2] = smbiosUuid[1];
-                                uuidBytes[3] = smbiosUuid[0];
-                                uuidBytes[4] = smbiosUuid[5];
-                                uuidBytes[5] = smbiosUuid[4];
-                                uuidBytes[6] = smbiosUuid[7];
-                                uuidBytes[7] = smbiosUuid[6];
-                                for (INT32 i = 8; i < 16; i++)
-                                    uuidBytes[i] = smbiosUuid[i];
-                            } else {
-                                for (INT32 i = 0; i < 16; i++)
-                                    uuidBytes[i] = smbiosUuid[i];
-                            }
-
-                            *uuid = UUID(uuidBytes);
-                            found = TRUE;
-                            break;
-                    }
-                }
-
-                PUINT8 stringTable = tableData + structureLength;
-                while (stringTable < tableEnd - 1 && !(stringTable[0] == 0 && stringTable[1] == 0))
-                    stringTable++;
-                if (stringTable >= tableEnd - 1)
-                    break;
-                tableData = stringTable + 2;
-            }
-        }
+    if (queryResult != NTSTATUS(0)){
+        ntdll.RtlFreeHeap(peb->ProcessHeap, 0, buffer);
+        return FALSE;
     }
+    auto rawSmbios = (PRAW_SMBIOS_DATA)firmwareInfo->TableBuffer;
+	PUINT8 tableData = rawSmbios->SMBIOSTableData;
+	UINT32 tableLength = rawSmbios->Length;
+	PUINT8 tableEnd = tableData + tableLength;
 
-    ntdll.RtlFreeHeap(peb->ProcessHeap, 0, buffer);
+	BOOL found = false;
+
+    while (tableData < tableEnd)
+	{
+		auto header = (PSMBIOS_HEADER)tableData;
+
+		if (tableData + header->Length > tableEnd)
+			break;
+
+		// Type 1 = System Information, Length >= 0x19 means UUID field is present.
+		if (header->Type == 1 && header->Length >= 0x19)
+		{
+			auto systemInfo = (PSMBIOS_TYPE1_SYSTEM_INFORMATION)tableData;
+
+			// Check for all-FF (not set) or all-00 (not present).
+			BOOL allZero = true;
+			BOOL allFF = true;
+			for (INT32 i = 0; i < 16; i++)
+			{
+				if (systemInfo->UUID[i] != 0x00) allZero = false;
+				if (systemInfo->UUID[i] != 0xFF) allFF = false;
+			}
+
+			if (!allZero && !allFF)
+			{
+				// SMBIOS UUID is stored in mixed-endian format per spec.
+				// First 3 fields are little-endian, remaining 8 bytes are big-endian.
+				// Convert to standard RFC 9562 network byte order.
+				UINT8 uuidBytes[16];
+
+				// TimeLow (4 bytes, little-endian -> big-endian)
+				uuidBytes[0] = systemInfo->UUID[3];
+				uuidBytes[1] = systemInfo->UUID[2];
+				uuidBytes[2] = systemInfo->UUID[1];
+				uuidBytes[3] = systemInfo->UUID[0];
+
+				// TimeMid (2 bytes, little-endian -> big-endian)
+				uuidBytes[4] = systemInfo->UUID[5];
+				uuidBytes[5] = systemInfo->UUID[4];
+
+				// TimeHiAndVersion (2 bytes, little-endian -> big-endian)
+				uuidBytes[6] = systemInfo->UUID[7];
+				uuidBytes[7] = systemInfo->UUID[6];
+
+				// Remaining 8 bytes are already in big-endian order.
+				for (INT32 i = 8; i < 16; i++)
+					uuidBytes[i] = systemInfo->UUID[i];
+
+				*uuid = UUID(uuidBytes);
+				found = true;
+				break;
+			}
+		}
+
+		// Skip past the formatted area to the string table.
+		PUINT8 stringTable = tableData + header->Length;
+
+		// The string table is terminated by a double null (0x00, 0x00).
+		while (stringTable < tableEnd - 1 && !(stringTable[0] == 0x00 && stringTable[1] == 0x00))
+			stringTable++;
+
+		// Advance past the double null terminator to the next structure.
+		tableData = stringTable + 2;
+	}
+
+	ntdll.RtlFreeHeap(peb->ProcessHeap, 0, buffer);
     return found;
 }
 
