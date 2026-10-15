@@ -12,7 +12,7 @@ static BOOL GetMachineUUID(UUID *uuid){
 	request.Action = SystemFirmwareTable_Get;
 	request.TableID = 0;
 	request.TableBufferLength = 0;
-
+    
     NTDLL ntdll;
     if (!NTDLL_Ctor(&ntdll) || ntdll.ZwQuerySystemInformation == NULL ||
         ntdll.RtlAllocateHeap == NULL || ntdll.RtlFreeHeap == NULL)
@@ -119,14 +119,17 @@ static BOOL GetMachineUUID(UUID *uuid){
 }
 
 
-
 void GetSystemInfo(SystemInfo *facts)
 {
     MemoryZero(facts, sizeof(*facts));
+    BOOL res = GetMachineUUID(&facts->MachineUUID);
+    if (!res)
+        MemoryZero(&facts->MachineUUID, sizeof(facts->MachineUUID));
 
     NTDLL ntdll;
     KERNEL32 kernel;
     ADVAPI advapi;
+
     if(!KERNEL32_Ctor(&kernel) || !NTDLL_Ctor(&ntdll)){
         return;
     }

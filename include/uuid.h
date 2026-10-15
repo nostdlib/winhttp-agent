@@ -2,6 +2,8 @@
 
 #include "types.h"
 #include "stackstrings.h"
+#include "ntdll.h"
+#include "system.h"
 
 class UUID {
     UINT8 data[16];
@@ -36,4 +38,6 @@ class UUID {
             out[index] = '\0';
             return TRUE;
         }
+
+        
 };

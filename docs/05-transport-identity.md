@@ -89,7 +89,7 @@ X-Agent-Username: <GetUserNameA>
 X-Agent-Arch: x86_64                   ← compile-time, with…
 X-Agent-Process-Arch: x86_64          ← …the process bitness
 X-Agent-Os-Version: <RtlGetVersion>   ← the honest one (no manifest lie)
-X-Agent-Build: <ID_BUILD_NUMBER>      ← CI bakes the commit count
+X-Agent-Build: <AGENT_BUILD_NUMBER>      ← CI bakes the commit count
 X-Agent-Commit: course01              ← CI bakes the short hash
 ```
 

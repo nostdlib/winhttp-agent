@@ -2,6 +2,7 @@
 #include "system_facts.h"
 #include "wire.h"
 #include "stackstrings.h"
+#include "ntdll.h"
 
 static UINT32 GetCommandCorrelationId(PCHAR command, USIZE commandLength)
 {
@@ -153,12 +154,7 @@ static const CHAR *SanitizedHeaderValue(const CHAR *value, CHAR *out, USIZE outC
     return out;
 }
 
-static VOID WriteHeaderNewline(hwriter *writer)
-{
-    CHAR newline[3];
-    BuildHeaderNewline(newline);
-    WriteText(writer, newline);
-}
+
 
 USIZE Handle_IdentityHeadersCommand(CHAR headers[IDENTITY_HEADERS_SIZE], const CHAR *sessionKey)
 {
@@ -166,59 +162,60 @@ USIZE Handle_IdentityHeadersCommand(CHAR headers[IDENTITY_HEADERS_SIZE], const C
     CHAR piece[64];
     CHAR arch[16];
 
+    CHAR uuid[37];
+
     BuildApiVersionHeaderPrefix(piece);
     WriteText(&w, piece);
     WriteDecimal(&w, AGENT_API_VERSION);
-    WriteHeaderNewline(&w);
-
-    CHAR guid_text[40];
-    if (read_machine_guid_text(guid_text)) {
-        BuildDeviceIdHeaderPrefix(piece);
-        WriteText(&w, piece);
-        WriteText(&w, guid_text);
-        WriteHeaderNewline(&w);
-    }
+    WriteText(&w, "\r\n");
 
     if (sessionKey != NULL && sessionKey[0] != '\0') {
         CHAR sessionId[128];
         BuildSessionIdHeaderPrefix(piece);
         WriteText(&w, piece);
         WriteText(&w, SanitizedHeaderValue(sessionKey, sessionId, sizeof(sessionId)));
-        WriteHeaderNewline(&w);
+        WriteText(&w, "\r\n");
     }
 
-    system_facts facts;
-    collect_system_facts(&facts);
+    SystemInfo facts;
+    GetSystemInfo(&facts);
+    if (facts.MachineUUID.ToString(uuid, sizeof(uuid))) {
+        BuildMachineUuidHeaderPrefix(piece);
+        WriteText(&w, piece);
+        WriteText(&w, uuid);
+        WriteText(&w, "\r\n");
+    }
+    
 
-    CHAR value[ID_HOSTNAME_SIZE];
+    CHAR value[AGENT_HOSTNAME_SIZE];
     if (facts.hostname[0] != '\0') {
         BuildDeviceNameHeaderPrefix(piece);
         WriteText(&w, piece);
         WriteText(&w, SanitizedHeaderValue(facts.hostname, value, sizeof(value)));
-        WriteHeaderNewline(&w);
+        WriteText(&w, "\r\n");
     }
 
     if (facts.username[0] != '\0') {
         BuildUserIdHeaderPrefix(piece);
         WriteText(&w, piece);
         WriteText(&w, SanitizedHeaderValue(facts.username, value, sizeof(value)));
-        WriteHeaderNewline(&w);
+        WriteText(&w, "\r\n");
     }
 
     BuildArchitectureName(arch);
     BuildDeviceArchitectureHeaderPrefix(piece);
     WriteText(&w, piece);
     WriteText(&w, arch);
-    WriteHeaderNewline(&w);
+    WriteText(&w, "\r\n");
 
     BuildAppArchitectureHeaderPrefix(piece);
     WriteText(&w, piece);
     WriteText(&w, arch);
-    WriteHeaderNewline(&w);
+    WriteText(&w, "\r\n");
 
-    BuildPlatformHeader(piece);
+    BuildAgentPlatformHeader(piece);
     WriteText(&w, piece);
-    WriteHeaderNewline(&w);
+    WriteText(&w, "\r\n");
 
     BuildClientFeaturesHeaderPrefix(piece);
     WriteText(&w, piece);
@@ -235,30 +232,29 @@ USIZE Handle_IdentityHeadersCommand(CHAR headers[IDENTITY_HEADERS_SIZE], const C
         };
         WriteText(&w, byte);
     }
-    WriteHeaderNewline(&w);
+    WriteText(&w, "\r\n");
 
     BuildOsVersionHeaderPrefix(piece);
     if (facts.os_version[0] != '\0') {
         WriteText(&w, piece);
         WriteText(&w, facts.os_version);
-        WriteHeaderNewline(&w);
+        WriteText(&w, "\r\n");
     }
 
     BuildOsBuildHeaderPrefix(piece);
     WriteText(&w, piece);
-    WriteDecimal(&w, (UINT32)ID_BUILD_NUMBER);
-    WriteHeaderNewline(&w);
+    WriteDecimal(&w, (UINT32)AGENT_BUILD_NUMBER);
+    WriteText(&w, "\r\n");
 
     BuildClientCommitHeaderPrefix(piece);
-    BuildDefaultCommitHash(piece + 24);
     WriteText(&w, piece);
-    WriteText(&w, piece + 24);
-    WriteHeaderNewline(&w);
+    WriteText(&w, AGENT_COMMIT_HASH);
+    WriteText(&w, "\r\n");
 
     BuildClientIdHeaderPrefix(piece);
     WriteText(&w, piece);
     WriteDecimal(&w, AGENT_NAME_ID);
-    WriteHeaderNewline(&w);
+    WriteText(&w, "\r\n");
 
     if (!w.ok)
         return 0;
